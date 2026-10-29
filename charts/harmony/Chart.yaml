@@ -1,0 +1,23 @@
+apiVersion: v2
+name: harmony
+description: >-
+  Harmony (federated chat and social platform) on Kubernetes: web app, federation
+  backend (server + worker), router, media cache, Redis, and optional bot gateway,
+  Discord bridge host and LiveKit voice. Supabase runs separately.
+type: application
+version: 0.1.0
+appVersion: "1.9.2"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/jonsjava/harmony-kuberrnetes
+sources:
+  - https://github.com/y4my4my4m/harmony
+  - https://github.com/jonsjava/harmony-kuberrnetes
+keywords:
+  - harmony
+  - activitypub
+  - chat
+  - federation
+  - supabase
+maintainers:
+  - name: jonsjava
+    url: https://github.com/jonsjava

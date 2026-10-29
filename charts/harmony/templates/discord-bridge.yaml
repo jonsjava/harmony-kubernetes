@@ -1,0 +1,95 @@
+{{- if .Values.discordBridge.enabled }}
+{{- $c := "discord-bridge" }}
+{{- $v := .Values.discordBridge }}
+{{- $ctx := dict "root" . "component" $c }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  # Every hosted bridge holds one Discord connection: a single host.
+  replicas: 1
+  serviceName: {{ include "harmony.componentName" $ctx }}
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: discord-bridge
+          image: {{ include "harmony.thirdPartyImage" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: BRIDGE_MODE
+              value: host
+            - name: HARMONY_URL
+              value: {{ printf "http://%s:3002" (include "harmony.componentName" (dict "root" . "component" "bot-gateway")) | quote }}
+            - name: HARMONY_PUBLIC_URL
+              value: {{ include "harmony.appUrl" . | quote }}
+            {{- include "harmony.env.secret" (dict "root" . "name" "BRIDGE_HOST_SECRET") | nindent 12 }}
+            {{- with $v.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml $v.persistence.accessModes | nindent 10 }}
+        {{- with $v.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $v.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+{{- end }}

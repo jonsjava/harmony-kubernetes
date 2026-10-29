@@ -1,0 +1,10 @@
+harmony:
+  domain: chat.example.com
+  adminEmail: admin@example.com
+supabase:
+  internalUrl: http://supabase-supabase-kong.supabase.svc:8000
+  anonKey: anon-test
+  serviceRoleKey: service-test
+  db:
+    host: supabase-supabase-db.supabase.svc
+    password: pg-test

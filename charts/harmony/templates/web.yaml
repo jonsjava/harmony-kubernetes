@@ -1,0 +1,96 @@
+{{- $c := "web" }}
+{{- $v := .Values.web }}
+{{- $ctx := dict "root" . "component" $c }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  {{- include "harmony.replicas" (dict "replicas" $v.replicaCount "autoscaling" $v.autoscaling) | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+      {{- with $v.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: {{ include "harmony.image" (dict "root" . "repository" $v.image.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The nginx image starts as root to write /config.json and drop to
+          # its worker user; no privilege escalation beyond that.
+          securityContext:
+            allowPrivilegeEscalation: false
+          env:
+            - name: SUPABASE_URL
+              value: {{ include "harmony.supabasePublicUrl" . | quote }}
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "harmony.supabaseSecretName" . }}
+                  key: {{ .Values.supabase.existingSecretKeys.anonKey }}
+            - name: DOMAIN
+              value: {{ include "harmony.domain" . | quote }}
+            - name: INSTANCE_NAME
+              value: {{ .Values.harmony.instanceName | quote }}
+            - name: APP_URL
+              value: {{ include "harmony.appUrl" . | quote }}
+            - name: ENABLED_OAUTH_PROVIDERS
+              value: {{ .Values.harmony.enabledOAuthProviders | quote }}
+            - name: TERMS_URL
+              value: {{ .Values.harmony.termsUrl | quote }}
+            - name: PRIVACY_URL
+              value: {{ .Values.harmony.privacyUrl | quote }}
+            - name: STATUS_URL
+              value: {{ .Values.harmony.statusUrl | quote }}
+            {{- with $v.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /config.json
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if $v.autoscaling.enabled }}
+---
+{{ include "harmony.scaledObject" (dict "root" . "component" $c "autoscaling" $v.autoscaling) }}
+{{- end }}

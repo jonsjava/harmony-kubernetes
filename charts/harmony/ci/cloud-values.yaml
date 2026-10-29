@@ -1,0 +1,22 @@
+harmony:
+  domain: chat.example.com
+  adminEmail: admin@example.com
+supabase:
+  internalUrl: https://abcd.supabase.co
+  publicUrl: https://abcd.supabase.co
+  proxy:
+    enabled: false
+  anonKey: a
+  serviceRoleKey: s
+  db:
+    host: db.abcd.supabase.co
+    password: p
+    sslmode: require
+redis:
+  enabled: false
+  external:
+    host: redis.example.internal
+    tls: true
+federation:
+  worker:
+    autoscaling: {enabled: true}

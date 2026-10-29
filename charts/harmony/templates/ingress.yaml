@@ -1,0 +1,61 @@
+{{- if .Values.ingress.enabled }}
+{{- $router := include "harmony.componentName" (dict "root" . "component" "router") }}
+{{- $hosts := list (include "harmony.domain" .) }}
+{{- if .Values.supabase.proxy.enabled }}{{ $hosts = append $hosts (include "harmony.dbDomain" .) }}{{ end }}
+{{- if .Values.livekit.enabled }}{{ $hosts = append $hosts (include "harmony.liveDomain" .) }}{{ end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "harmony.fullname" . }}
+  labels:
+    {{- include "harmony.labels" (dict "root" . "component" "ingress") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- toYaml $hosts | nindent 8 }}
+      secretName: {{ default (printf "%s-tls" (include "harmony.fullname" .)) .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ include "harmony.domain" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $router }}
+                port:
+                  name: http
+    {{- if .Values.supabase.proxy.enabled }}
+    - host: {{ include "harmony.dbDomain" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $router }}
+                port:
+                  name: http
+    {{- end }}
+    {{- if .Values.livekit.enabled }}
+    - host: {{ include "harmony.liveDomain" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "harmony.componentName" (dict "root" . "component" "livekit") }}
+                port:
+                  name: http
+    {{- end }}
+{{- end }}

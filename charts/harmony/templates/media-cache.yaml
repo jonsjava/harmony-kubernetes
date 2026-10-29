@@ -1,0 +1,158 @@
+{{- if and .Values.mediaCache.enabled .Values.supabase.proxy.enabled }}
+{{- $c := "media-cache" }}
+{{- $v := .Values.mediaCache }}
+{{- $ctx := dict "root" . "component" $c }}
+{{- $https := eq (include "harmony.kongScheme" .) "https" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+data:
+  default.conf: |
+    # Public storage reads cached on disk in front of Kong (upstream
+    # self-host/media-cache.conf). The router sends GET/HEAD of
+    # /storage/v1/object/public/* and /storage/v1/render/image/public/* here,
+    # message_media aside. Entries live 10 minutes whatever storage's
+    # Cache-Control says; no-store/private responses are never kept.
+    map $upstream_http_cache_control $media_no_store {
+        ~*(no-store|private) 1;
+        default 0;
+    }
+
+    proxy_cache_path /var/cache/nginx/media levels=1:2 keys_zone=media:16m max_size={{ $v.maxSize }} inactive=10m use_temp_path=off;
+
+    server {
+        listen 8080;
+        server_tokens off;
+
+        location = /healthz {
+            access_log off;
+            return 200 "ok";
+        }
+
+        location / {
+            proxy_pass {{ ternary "https" "http" $https }}://{{ include "harmony.kongHostPort" . }};
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            {{- if $https }}
+            proxy_ssl_server_name on;
+            proxy_set_header Host $proxy_host;
+            {{- else }}
+            proxy_set_header Host $host;
+            {{- end }}
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+
+            proxy_cache media;
+            proxy_cache_key $request_uri;
+            proxy_ignore_headers Cache-Control Expires;
+            proxy_cache_valid 200 10m;
+            proxy_no_cache $media_no_store;
+            proxy_cache_lock on;
+            proxy_cache_lock_timeout 5s;
+            proxy_cache_lock_age 5s;
+            proxy_cache_use_stale error timeout http_500 http_502 http_503 http_504;
+            add_header X-Cache-Status $upstream_cache_status always;
+        }
+    }
+{{- if $v.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml $v.persistence.accessModes | nindent 4 }}
+  {{- with $v.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $v.persistence.size }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ $v | toJson | cat (include "harmony.kongHostPort" .) | sha256sum | trunc 16 }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: {{ include "harmony.thirdPartyImage" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: cache
+              mountPath: /var/cache/nginx/media
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "harmony.componentName" $ctx }}
+        - name: cache
+          {{- if $v.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "harmony.componentName" $ctx }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ $v.persistence.size }}
+          {{- end }}
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

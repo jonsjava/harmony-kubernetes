@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "harmony.componentName" (dict "root" . "component" "test") }}
+  labels:
+    {{- include "harmony.labels" (dict "root" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: check
+      image: {{ include "harmony.thirdPartyImage" .Values.migrations.gitImage }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command: [sh, -ec]
+      args:
+        - |
+          router=http://{{ include "harmony.componentName" (dict "root" . "component" "router") }}
+          host={{ include "harmony.domain" . }}
+          echo "web through the router"
+          wget -q -O- --header "Host: $host" "$router/config.json" | grep -q supabaseUrl
+          echo "federation health (needs the schema)"
+          wget -q -O- --header "Host: $host" "$router/health" | grep -q healthy
+          echo "nodeinfo discovery"
+          wget -q -O- --header "Host: $host" "$router/.well-known/nodeinfo" | grep -q nodeinfo
+          echo ok

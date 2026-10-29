@@ -1,0 +1,36 @@
+name: Release chart
+
+# Tag chart-vX.Y.Z (matching charts/harmony/Chart.yaml version) to publish
+# oci://ghcr.io/<owner>/charts/harmony.
+on:
+  push:
+    tags: ["chart-v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Check the tag matches the chart version
+        run: |
+          chart_version="$(helm show chart charts/harmony | sed -n 's/^version: //p')"
+          [ "chart-v$chart_version" = "$GITHUB_REF_NAME" ] ||
+            { echo "tag $GITHUB_REF_NAME does not match chart version $chart_version"; exit 1; }
+
+      - name: Package and push
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "$owner" --password-stdin
+          helm package charts/harmony -d dist
+          helm push dist/*.tgz "oci://ghcr.io/$owner/charts"

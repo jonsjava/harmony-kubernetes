@@ -1,0 +1,48 @@
+name: Lint chart
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validators
+        run: pip install kubernetes-validate jsonschema pyyaml
+
+      - name: Fetch KEDA and Gateway API CRDs
+        run: |
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/kedacore/keda /tmp/keda
+          git -C /tmp/keda sparse-checkout set config/crd/bases
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/kubernetes-sigs/gateway-api /tmp/gwapi
+          git -C /tmp/gwapi sparse-checkout set config/crd/standard
+
+      - name: Lint, render and validate
+        run: |
+          set -euo pipefail
+          for f in charts/harmony/ci/*-values.yaml; do
+            echo "::group::$f"
+            helm lint charts/harmony -f "$f" --strict
+            helm template h charts/harmony -n harmony -f "$f" > "/tmp/$(basename "$f" .yaml).out.yaml"
+            kubernetes-validate -k 1.31.0 --strict "/tmp/$(basename "$f" .yaml).out.yaml"
+            echo "::endgroup::"
+          done
+          python3 .github/scripts/validate-crs.py /tmp/*.out.yaml
+
+      - name: Check the migration script
+        run: sh -n charts/harmony/files/migrate.sh && node --check charts/harmony/files/create-admin.mjs

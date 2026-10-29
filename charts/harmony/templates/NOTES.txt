@@ -1,0 +1,37 @@
+Harmony {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+  App:       https://{{ include "harmony.domain" . }}
+  Supabase:  {{ include "harmony.supabasePublicUrl" . }}{{ if .Values.supabase.proxy.enabled }} (through the router to {{ include "harmony.supabaseInternalUrl" . }}){{ end }}
+{{- if .Values.livekit.enabled }}
+  Voice:     wss://{{ include "harmony.liveDomain" . }}  (media: TCP {{ .Values.livekit.rtc.tcpPort }}, UDP {{ .Values.livekit.rtc.udpPort }})
+{{- end }}
+
+DNS: point {{ include "harmony.domain" . }}{{ if .Values.supabase.proxy.enabled }}, {{ include "harmony.dbDomain" . }}{{ end }}{{ if .Values.livekit.enabled }} and {{ include "harmony.liveDomain" . }}{{ end }} at your ingress/gateway.
+
+{{- if .Values.migrations.enabled }}
+
+Database: the "{{ include "harmony.componentName" (dict "root" . "component" "migrations") }}" job applies the schema.
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "harmony.componentName" (dict "root" . "component" "migrations") }} --all-containers
+{{- end }}
+
+{{- if not .Values.admin.create }}
+
+No admin account was created. Set admin.create=true with admin.email, admin.username and
+admin.existingSecret (key "password"), then `helm upgrade`. Until an admin exists the
+first local account to sign up becomes the admin.
+{{- end }}
+
+{{- if and .Values.livekit.enabled (not .Values.livekit.hostNetwork) (not .Values.livekit.rtc.nodeIP) }}
+
+LiveKit: set livekit.rtc.nodeIP to the external IP of the
+"{{ include "harmony.componentName" (dict "root" . "component" "livekit-rtc") }}" Service so ICE candidates carry the right address:
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "harmony.componentName" (dict "root" . "component" "livekit-rtc") }}
+{{- end }}
+
+{{- if not .Values.secrets.vapidPublicKey }}
+
+Push notifications are off until secrets.vapidPublicKey / vapidPrivateKey are set
+(npx web-push generate-vapid-keys).
+{{- end }}
+
+Generated secrets live in Secret "{{ include "harmony.secretName" . }}" (kept on uninstall). Back it up.

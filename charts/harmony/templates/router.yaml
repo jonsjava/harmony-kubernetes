@@ -1,0 +1,108 @@
+{{- $c := "router" }}
+{{- $v := .Values.router }}
+{{- $ctx := dict "root" . "component" $c }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+data:
+  Caddyfile: |
+    {{- include "harmony.caddyfile" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  {{- include "harmony.replicas" (dict "replicas" $v.replicaCount "autoscaling" $v.autoscaling) | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/caddyfile: {{ include "harmony.caddyfile" . | sha256sum | trunc 16 }}
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: caddy
+          image: {{ include "harmony.thirdPartyImage" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            # The caddy binary carries the cap_net_bind_service file capability;
+            # exec fails when the bounding set lacks it.
+            capabilities:
+              drop: [ALL]
+              add: [NET_BIND_SERVICE]
+          env:
+            - name: DOMAIN
+              value: {{ include "harmony.domain" . | quote }}
+            - name: DB_DOMAIN
+              value: {{ include "harmony.dbDomain" . | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 30
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: {{ include "harmony.componentName" $ctx }}
+        - name: data
+          emptyDir: {}
+        - name: config
+          emptyDir: {}
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if $v.autoscaling.enabled }}
+---
+{{ include "harmony.scaledObject" (dict "root" . "component" $c "autoscaling" $v.autoscaling) }}
+{{- end }}

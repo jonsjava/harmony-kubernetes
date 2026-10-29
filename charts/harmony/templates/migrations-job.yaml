@@ -1,0 +1,132 @@
+{{- if .Values.migrations.enabled }}
+{{- $m := .Values.migrations }}
+{{- $ctx := dict "root" . "component" "migrations" }}
+{{- $tag := toString (default .Chart.AppVersion .Values.image.tag) }}
+{{- $ref := $m.git.ref }}
+{{- if not $ref }}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+" $tag }}{{ $ref = printf "v%s" $tag }}{{ else }}{{ $ref = "master" }}{{ end }}
+{{- end }}
+{{- $db := .Values.supabase.db }}
+# The script is a hook too, so a pre-upgrade run already sees the new version.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  migrate.sh: |
+    {{- .Files.Get "files/migrate.sh" | nindent 4 }}
+---
+# Schema changes land before the new pods on upgrade (as upstream update.sh
+# does); on install the release's Secret must exist first, hence post-install.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ $m.backoffLimit }}
+  activeDeadlineSeconds: {{ $m.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: fetch-migrations
+          image: {{ include "harmony.thirdPartyImage" $m.gitImage }}
+          imagePullPolicy: {{ $m.gitImage.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: HOME
+              value: /tmp
+          command: [sh, -ec]
+          args:
+            - |
+              git clone --quiet --depth 1 --branch {{ $ref | quote }} --filter=blob:none --sparse {{ $m.git.repository | quote }} /src
+              git -C /src sparse-checkout set db_schema/migrations
+              echo "migrations from {{ $ref }} ($$(git -C /src rev-parse --short HEAD)): $$(ls /src/db_schema/migrations | wc -l) files"
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          volumeMounts:
+            - name: src
+              mountPath: /src
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: migrate
+          image: {{ include "harmony.thirdPartyImage" $m.psqlImage }}
+          imagePullPolicy: {{ $m.psqlImage.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: [sh, /scripts/migrate.sh]
+          env:
+            - name: PGHOST
+              value: {{ $db.host | quote }}
+            - name: PGPORT
+              value: {{ $db.port | quote }}
+            - name: PGDATABASE
+              value: {{ $db.database | quote }}
+            - name: PGUSER
+              value: {{ $db.user | quote }}
+            - name: PGSSLMODE
+              value: {{ $db.sslmode | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "harmony.dbSecretName" . }}
+                  key: {{ include "harmony.dbSecretKey" . }}
+            - name: PGCONNECT_TIMEOUT
+              value: "10"
+            - name: MIGRATIONS_DIR
+              value: /src/db_schema/migrations
+            - name: SCHEMA_WAIT
+              value: {{ $m.schemaWaitSeconds | quote }}
+            {{- include "harmony.env.secret" (dict "root" . "name" "LISTENER_PASSWORD") | nindent 12 }}
+            - name: DOMAIN
+              value: {{ include "harmony.domain" . | quote }}
+            - name: INSTANCE_NAME
+              value: {{ .Values.harmony.instanceName | quote }}
+            - name: STORAGE_ORIGIN
+              value: {{ include "harmony.supabasePublicUrl" . | lower | quote }}
+            - name: FILE_SIZE_LIMIT
+              value: {{ .Values.supabase.fileSizeLimit | int64 | quote }}
+            - name: REGISTRATION
+              value: {{ .Values.harmony.registration | quote }}
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: src
+              mountPath: /src
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "harmony.componentName" $ctx }}
+        - name: src
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

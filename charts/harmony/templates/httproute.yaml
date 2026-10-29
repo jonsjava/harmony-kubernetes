@@ -1,0 +1,41 @@
+{{- if .Values.gateway.enabled }}
+{{- if not .Values.gateway.parentRefs }}
+{{- fail "gateway.enabled needs gateway.parentRefs" }}
+{{- end }}
+{{- $router := include "harmony.componentName" (dict "root" . "component" "router") }}
+{{- $routes := list (dict "name" "app" "hosts" (list (include "harmony.domain" .)) "service" $router "port" 80) }}
+{{- if .Values.supabase.proxy.enabled }}
+{{- $routes = append $routes (dict "name" "db" "hosts" (list (include "harmony.dbDomain" .)) "service" $router "port" 80) }}
+{{- end }}
+{{- if .Values.livekit.enabled }}
+{{- $routes = append $routes (dict "name" "live" "hosts" (list (include "harmony.liveDomain" .)) "service" (include "harmony.componentName" (dict "root" . "component" "livekit")) "port" 7880) }}
+{{- end }}
+{{- range $i, $r := $routes }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "harmony.componentName" (dict "root" $ "component" $r.name) }}
+  labels:
+    {{- include "harmony.labels" (dict "root" $ "component" "gateway") | nindent 4 }}
+  {{- with $.Values.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $.Values.gateway.parentRefs | nindent 4 }}
+  hostnames:
+    {{- toYaml $r.hosts | nindent 4 }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $r.service }}
+          port: {{ $r.port }}
+{{- end }}
+{{- end }}

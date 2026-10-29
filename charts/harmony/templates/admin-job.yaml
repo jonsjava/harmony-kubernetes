@@ -1,0 +1,78 @@
+{{- if .Values.admin.create }}
+{{- $ctx := dict "root" . "component" "admin" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  create-admin.mjs: |
+    {{- .Files.Get "files/create-admin.mjs" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: create-admin
+          image: {{ include "harmony.image" (dict "root" . "repository" .Values.federation.image.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: [node, /scripts/create-admin.mjs]
+          env:
+            - name: SUPABASE_URL
+              value: {{ include "harmony.supabaseInternalUrl" . | quote }}
+            {{- include "harmony.env.supabaseKeys" . | nindent 12 }}
+            - name: FEDERATION_URL
+              value: {{ printf "http://%s:3001" (include "harmony.componentName" (dict "root" . "component" "federation-server")) | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.admin.email | quote }}
+            - name: ADMIN_USERNAME
+              value: {{ .Values.admin.username | quote }}
+            - name: ADMIN_DISPLAY_NAME
+              value: {{ .Values.admin.displayName | quote }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.admin.existingSecret }}
+                  key: {{ .Values.admin.existingSecretPasswordKey }}
+            - name: REGISTRATION
+              value: {{ .Values.harmony.registration | quote }}
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "harmony.componentName" $ctx }}
+{{- end }}

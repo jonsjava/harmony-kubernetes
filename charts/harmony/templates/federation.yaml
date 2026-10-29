@@ -1,0 +1,183 @@
+{{- $fed := .Values.federation }}
+{{- $fedImage := include "harmony.image" (dict "root" . "repository" $fed.image.repository) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harmony.componentName" (dict "root" . "component" "federation") }}
+  labels:
+    {{- include "harmony.labels" (dict "root" . "component" "federation") | nindent 4 }}
+data:
+  NODE_ENV: production
+  INSTANCE_DOMAIN: {{ include "harmony.domain" . | quote }}
+  INSTANCE_NAME: {{ .Values.harmony.instanceName | quote }}
+  API_BASE_URL: {{ include "harmony.appUrl" . | quote }}
+  CORS_ORIGIN: {{ include "harmony.appUrl" . | quote }}
+  SUPABASE_URL: {{ include "harmony.supabaseInternalUrl" . | quote }}
+  PUBLIC_SUPABASE_URL: {{ include "harmony.supabasePublicUrl" . | quote }}
+  USE_BULLMQ_QUEUE: "true"
+  VAPID_SUBJECT: {{ .Values.harmony.adminEmail | trimPrefix "mailto:" | quote }}
+  LOG_LEVEL: {{ $fed.logLevel | quote }}
+  TRUST_PROXY: {{ $fed.trustProxy | quote }}
+  WEBRTC_MODE: {{ $fed.webrtcMode | quote }}
+  PUSH_RELAY_ENABLED: {{ $fed.pushRelayEnabled | toString | quote }}
+  {{- if .Values.livekit.enabled }}
+  LIVEKIT_URL: {{ printf "ws://%s:7880" (include "harmony.componentName" (dict "root" . "component" "livekit")) | quote }}
+  LIVEKIT_PUBLIC_URL: {{ printf "wss://%s" (include "harmony.liveDomain" .) | quote }}
+  {{- end }}
+{{- range $role := list "server" "worker" }}
+{{- $v := index $fed $role }}
+{{- $c := printf "federation-%s" $role }}
+{{- $ctx := dict "root" $ "component" $c }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  {{- include "harmony.replicas" (dict "replicas" $v.replicaCount "autoscaling" $v.autoscaling) | nindent 2 }}
+  {{- if eq $role "worker" }}
+  # Old and new worker never run the queues side by side.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum | trunc 16 }}
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "harmony.imagePullSecrets" $ | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" $ }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ ternary 60 30 (eq $role "worker") }}
+      containers:
+        - name: federation
+          image: {{ $fedImage }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "harmony.componentName" (dict "root" $ "component" "federation") }}
+            {{- with $fed.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: FEDERATION_MODE
+              value: {{ $role }}
+            {{- if eq $role "server" }}
+            - name: PORT
+              value: "3001"
+            {{- end }}
+            {{- include "harmony.env.supabaseKeys" $ | nindent 12 }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" "REDIS_PASSWORD") | nindent 12 }}
+            - name: REDIS_URL
+              value: {{ include "harmony.redisUrl" $ | quote }}
+            {{- if eq $role "worker" }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" "LISTENER_PASSWORD") | nindent 12 }}
+            - name: FEDERATION_LISTENER_URL
+              value: {{ include "harmony.listenerUrl" $ | quote }}
+            {{- end }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" "INTERNAL_API_SECRET") | nindent 12 }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" "LIVEKIT_API_KEY") | nindent 12 }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" "LIVEKIT_API_SECRET") | nindent 12 }}
+            {{- range $k := list "VAPID_PUBLIC_KEY" "VAPID_PRIVATE_KEY" "MEDIA_URL_SECRET" "KLIPY_API_KEY_ADS" "KLIPY_API_KEY_NOADS" "FCM_SERVICE_ACCOUNT_JSON" }}
+            {{- include "harmony.env.secret" (dict "root" $ "name" $k "optional" true) | nindent 12 }}
+            {{- end }}
+            {{- with $fed.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if eq $role "server" }}
+          ports:
+            - name: http
+              containerPort: 3001
+          # /health answers 503 until the schema exists (it reads profiles),
+          # so readiness and liveness check the socket; startup gets time.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            # winston writes logs/ under /app; the root filesystem is read-only.
+            - name: logs
+              mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: logs
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" (dict "root" . "component" "federation-server") }}
+  labels:
+    {{- include "harmony.labels" (dict "root" . "component" "federation-server") | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" (dict "root" . "component" "federation-server") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+{{- if $fed.server.autoscaling.enabled }}
+---
+{{ include "harmony.scaledObject" (dict "root" . "component" "federation-server" "autoscaling" $fed.server.autoscaling) }}
+{{- end }}
+{{- $wa := $fed.worker.autoscaling }}
+{{- if $wa.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "harmony.componentName" (dict "root" . "component" "redis-auth") }}
+  labels:
+    {{- include "harmony.labels" (dict "root" . "component" "federation-worker") | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ include "harmony.secretName" . }}
+      key: REDIS_PASSWORD
+{{- $triggers := list }}
+{{- $addr := printf "%s:%s" (include "harmony.redisHost" .) (include "harmony.redisPort" .) }}
+{{- $tls := ternary "true" "false" (and (not .Values.redis.enabled) .Values.redis.external.tls) }}
+{{- range $q := $wa.queues }}
+{{- $triggers = append $triggers (dict
+      "type" "redis"
+      "name" (printf "queue-%s" $q)
+      "metadata" (dict "address" $addr "listName" (printf "harmony:%s:wait" $q) "listLength" (toString $wa.queueLengthTarget) "enableTLS" $tls)
+      "authenticationRef" (dict "name" (include "harmony.componentName" (dict "root" $ "component" "redis-auth")))) }}
+{{- end }}
+---
+{{ include "harmony.scaledObject" (dict "root" . "component" "federation-worker" "autoscaling" $wa "triggers" $triggers) }}
+{{- end }}

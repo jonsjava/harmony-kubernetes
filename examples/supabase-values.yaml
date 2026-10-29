@@ -1,0 +1,161 @@
+# =============================================================================
+# Values for supabase-community/supabase-kubernetes (charts/supabase) paired
+# with the Harmony chart. Carries upstream Harmony's supabase-overrides.yml:
+#   - GoTrue v2.196.0+ with custom OAuth/OIDC providers enabled
+#   - callback/redirect URLs on db.<domain>, site URL on <domain>
+#   - sign-up closed until an admin exists (open it later, see README)
+#   - imgproxy limits for animated emoji and large images
+#   - Kong without its own Ingress: Harmony's router serves db.<domain>
+#   - Edge functions off (federation runs as its own service)
+#
+# Replace chat.example.com everywhere, then:
+#   helm install supabase ./supabase-kubernetes/charts/supabase -n harmony \
+#     -f examples/supabase-values.yaml \
+#     --set secret.dashboard.password="$(openssl rand -hex 16)" \
+#     --set secret.realtime.secretKeyBase="$(openssl rand -base64 48)" \
+#     --set secret.meta.cryptoKey="$(openssl rand -hex 16)" \
+#     --set secret.analytics.publicAccessToken="$(openssl rand -hex 32)" \
+#     --set secret.analytics.privateAccessToken="$(openssl rand -hex 32)"
+#
+# The JWT and database Secrets come from scripts/generate-secrets.sh, which
+# the Harmony release reads too. The Helm lists below (environment.*) replace
+# the chart's defaults wholesale, so each keeps every default entry.
+# =============================================================================
+
+secret:
+  jwt:
+    secretRef: supabase-jwt
+    secretRefKey:
+      anonKey: anonKey
+      serviceKey: serviceKey
+      secret: secret
+  db:
+    secretRef: supabase-db
+    secretRefKey:
+      password: password
+      database: database
+  smtp:
+    # Real SMTP credentials, or leave mail off (MAILER_AUTOCONFIRM below).
+    username: ""
+    password: ""
+
+deployment:
+  functions:
+    enabled: false
+  minio:
+    enabled: false
+
+persistence:
+  db:
+    size: 20Gi
+  storage:
+    size: 50Gi
+  functions:
+    enabled: false
+  minio:
+    enabled: false
+
+ingress:
+  # Harmony's router fronts Kong at db.<domain>.
+  enabled: false
+
+environment:
+  auth:
+    - name: API_EXTERNAL_URL
+      value: https://db.chat.example.com
+    - name: GOTRUE_API_HOST
+      value: "0.0.0.0"
+    - name: GOTRUE_API_PORT
+      value: "9999"
+    - name: GOTRUE_SITE_URL
+      value: https://chat.example.com
+    - name: GOTRUE_URI_ALLOW_LIST
+      value: https://chat.example.com,https://chat.example.com/**
+    # true until the admin exists; false for registration=open afterwards.
+    - name: GOTRUE_DISABLE_SIGNUP
+      value: "true"
+    - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+      value: authenticated
+    - name: GOTRUE_JWT_ADMIN_ROLES
+      value: service_role
+    - name: GOTRUE_JWT_AUD
+      value: authenticated
+    - name: GOTRUE_JWT_EXP
+      value: "3600"
+    - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+      value: "true"
+    # true without SMTP (accounts usable at sign-up, no password resets).
+    - name: GOTRUE_MAILER_AUTOCONFIRM
+      value: "true"
+    - name: GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED
+      value: "false"
+    - name: GOTRUE_SMTP_ADMIN_EMAIL
+      value: noreply@chat.example.com
+    - name: GOTRUE_SMTP_HOST
+      value: ""
+    - name: GOTRUE_SMTP_PORT
+      value: "587"
+    - name: GOTRUE_EXTERNAL_PHONE_ENABLED
+      value: "false"
+    - name: GOTRUE_SMS_AUTOCONFIRM
+      value: "false"
+    - name: GOTRUE_SMTP_SENDER_NAME
+      value: Harmony
+    - name: GOTRUE_MAILER_URLPATHS_INVITE
+      value: "/auth/v1/verify"
+    - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
+      value: "/auth/v1/verify"
+    - name: GOTRUE_MAILER_URLPATHS_RECOVERY
+      value: "/auth/v1/verify"
+    - name: GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE
+      value: "/auth/v1/verify"
+    # --- Harmony (self-host/supabase-overrides.yml) ---
+    - name: GOTRUE_CUSTOM_OAUTH_ENABLED
+      value: "true"
+    - name: GOTRUE_CUSTOM_OAUTH_EXTERNAL_URL
+      value: https://db.chat.example.com/auth/v1
+    # Keep the built-in providers from joining existing accounts by address.
+    - name: GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS
+      value: github=github,google=google,twitch=twitch
+    # Google / GitHub / Twitch sign-in: set *_ENABLED, *_CLIENT_ID, *_SECRET.
+    - name: GOTRUE_EXTERNAL_GITHUB_ENABLED
+      value: "false"
+    - name: GOTRUE_EXTERNAL_GITHUB_REDIRECT_URI
+      value: https://db.chat.example.com/auth/v1/callback
+    - name: GOTRUE_EXTERNAL_GOOGLE_ENABLED
+      value: "false"
+    - name: GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI
+      value: https://db.chat.example.com/auth/v1/callback
+    - name: GOTRUE_EXTERNAL_TWITCH_ENABLED
+      value: "false"
+    - name: GOTRUE_EXTERNAL_TWITCH_REDIRECT_URI
+      value: https://db.chat.example.com/auth/v1/callback
+
+  imgproxy:
+    - name: IMGPROXY_BIND
+      value: ":5001"
+    - name: IMGPROXY_LOCAL_FILESYSTEM_ROOT
+      value: /
+    - name: IMGPROXY_USE_ETAG
+      value: "true"
+    - name: IMGPROXY_AUTO_WEBP
+      value: "true"
+    # Harmony: animated emoji count their frames toward the source limit.
+    - name: IMGPROXY_MAX_SRC_RESOLUTION
+      value: "50"
+    - name: IMGPROXY_MAX_ANIMATION_FRAMES
+      value: "120"
+
+  studio:
+    - name: HOSTNAME
+      value: "::"
+    - name: STUDIO_PORT
+      value: "3000"
+    - name: DEFAULT_ORGANIZATION_NAME
+      value: Harmony
+    - name: DEFAULT_PROJECT_NAME
+      value: Harmony
+    - name: SUPABASE_PUBLIC_URL
+      value: https://db.chat.example.com
+    - name: NEXT_ANALYTICS_BACKEND_PROVIDER
+      value: postgres

@@ -1,0 +1,102 @@
+{{- if .Values.redis.enabled }}
+{{- $c := "redis" }}
+{{- $v := .Values.redis }}
+{{- $ctx := dict "root" . "component" $c }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "harmony.componentName" $ctx }}
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: {{ include "harmony.thirdPartyImage" $v.image }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # BullMQ needs noeviction: an evicted job key loses the job.
+          command:
+            - sh
+            - -c
+            - exec redis-server --appendonly yes --maxmemory-policy noeviction --dir /data --requirepass "$REDIS_PASSWORD"
+          env:
+            {{- include "harmony.env.secret" (dict "root" . "name" "REDIS_PASSWORD") | nindent 12 }}
+            - name: REDISCLI_AUTH
+              value: $(REDIS_PASSWORD)
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: [redis-cli, ping]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [redis-cli, ping]
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not $v.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+  {{- if $v.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml $v.persistence.accessModes | nindent 10 }}
+        {{- with $v.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $v.persistence.size }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+{{- end }}

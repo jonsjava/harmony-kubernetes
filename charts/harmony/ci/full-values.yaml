@@ -1,0 +1,53 @@
+harmony:
+  domain: chat.example.com
+  adminEmail: admin@example.com
+  registration: invite
+image:
+  tag: edge
+supabase:
+  internalUrl: http://supabase-supabase-kong.supabase.svc:8000
+  existingSecret: supabase-jwt
+  existingSecretKeys: {anonKey: anonKey, serviceRoleKey: serviceKey}
+  db:
+    host: supabase-supabase-db.supabase.svc
+    existingSecret: supabase-db
+secrets:
+  vapidPublicKey: pub
+  vapidPrivateKey: priv
+botGateway:
+  enabled: true
+discordBridge:
+  enabled: true
+livekit:
+  enabled: true
+  rtc:
+    nodeIP: 203.0.113.10
+  extraConfig:
+    room:
+      max_participants: 50
+mediaCache:
+  persistence:
+    enabled: true
+admin:
+  create: true
+  email: owner@example.com
+  username: owner
+  existingSecret: harmony-admin
+ingress:
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+gateway:
+  enabled: true
+  parentRefs:
+    - name: public
+      namespace: gateway-system
+web:
+  autoscaling: {enabled: true}
+router:
+  autoscaling: {enabled: true}
+federation:
+  server:
+    autoscaling: {enabled: true, memory: 80}
+  worker:
+    autoscaling: {enabled: true}

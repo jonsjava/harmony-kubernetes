@@ -1,0 +1,98 @@
+{{- if .Values.botGateway.enabled }}
+{{- $c := "bot-gateway" }}
+{{- $v := .Values.botGateway }}
+{{- $ctx := dict "root" . "component" $c }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  # WebSocket sessions live in the process: one replica, replaced not overlapped.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "harmony.labels" $ctx | nindent 8 }}
+    spec:
+      {{- include "harmony.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "harmony.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: bot-gateway
+          image: {{ include "harmony.image" (dict "root" . "repository" $v.image.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3002"
+            - name: SUPABASE_URL
+              value: {{ include "harmony.supabaseInternalUrl" . | quote }}
+            - name: PUBLIC_URL
+              value: {{ include "harmony.supabasePublicUrl" . | quote }}
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "harmony.supabaseSecretName" . }}
+                  key: {{ .Values.supabase.existingSecretKeys.serviceRoleKey }}
+            - name: INSTANCE_DOMAIN
+              value: {{ include "harmony.domain" . | quote }}
+            - name: FEDERATION_BACKEND_URL
+              value: {{ default (include "harmony.appUrl" .) $v.federationBackendUrl | quote }}
+            - name: TRUST_PROXY
+              value: {{ $v.trustProxy | quote }}
+            {{- include "harmony.env.secret" (dict "root" . "name" "INTERNAL_API_SECRET") | nindent 12 }}
+            {{- if .Values.discordBridge.enabled }}
+            {{- include "harmony.env.secret" (dict "root" . "name" "BRIDGE_HOST_SECRET") | nindent 12 }}
+            {{- end }}
+            {{- with $v.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 3002
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- include "harmony.scheduling" $v | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "harmony.componentName" $ctx }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "harmony.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 3002
+      targetPort: http
+{{- end }}
