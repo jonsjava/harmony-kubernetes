@@ -1,0 +1,37 @@
+apiVersion: v1
+entries:
+  harmony:
+  - annotations:
+      artifacthub.io/license: MIT AND AGPL-3.0-only
+      artifacthub.io/links: |
+        - name: Harmony
+          url: https://github.com/y4my4my4m/harmony
+        - name: Chart source
+          url: https://github.com/jonsjava/harmony-kubernetes
+    apiVersion: v2
+    appVersion: 1.9.2
+    created: "2026-10-30T00:13:57.632096847Z"
+    description: 'Harmony (federated chat and social platform) on Kubernetes: web
+      app, federation backend (server + worker), router, media cache, Redis, and optional
+      bot gateway, Discord bridge host and LiveKit voice. Supabase runs separately.'
+    digest: 5822a7de31a3c96a85154c34116af26786482ba83273c03f60d54c7bbed0c2e5
+    home: https://github.com/jonsjava/harmony-kubernetes
+    keywords:
+    - harmony
+    - activitypub
+    - chat
+    - federation
+    - supabase
+    kubeVersion: '>=1.25.0-0'
+    maintainers:
+    - name: jonsjava
+      url: https://github.com/jonsjava
+    name: harmony
+    sources:
+    - https://github.com/y4my4my4m/harmony
+    - https://github.com/jonsjava/harmony-kubernetes
+    type: application
+    urls:
+    - https://github.com/jonsjava/harmony-kubernetes/releases/download/harmony-0.2.0/harmony-0.2.0.tgz
+    version: 0.2.0
+generated: "2026-10-30T00:13:57.632106976Z"
