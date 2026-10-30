@@ -25,8 +25,12 @@ jobs:
       - name: Install validators
         run: pip install kubernetes-validate jsonschema pyyaml
 
-      - name: Fetch KEDA and Gateway API CRDs
+      - name: Fetch KEDA, Gateway API, VPA and Prometheus Operator CRDs
         run: |
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/kubernetes/autoscaler /tmp/vpa
+          git -C /tmp/vpa sparse-checkout set vertical-pod-autoscaler/deploy
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/prometheus-operator/prometheus-operator /tmp/promop
+          git -C /tmp/promop sparse-checkout set example/prometheus-operator-crd
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/kedacore/keda /tmp/keda
           git -C /tmp/keda sparse-checkout set config/crd/bases
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/kubernetes-sigs/gateway-api /tmp/gwapi

@@ -1,0 +1,122 @@
+{{- if .Values.redis.enabled }}
+{{- $v := .Values.redis }}
+{{- $ctx := dict "root" . "component" "redis" }}
+{{- $name := include "harmony.componentName" $ctx }}
+{{- if and (or $v.metrics.serviceMonitor.enabled $v.metrics.prometheusRule.enabled) (not $v.metrics.enabled) }}
+{{- fail "redis.metrics.serviceMonitor / prometheusRule need redis.metrics.enabled" }}
+{{- end }}
+{{- if $v.vpa.enabled }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ $name }}
+  updatePolicy:
+    updateMode: {{ $v.vpa.updateMode | quote }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: redis
+        controlledResources: [memory]
+        controlledValues: {{ $v.vpa.controlledValues }}
+        {{- with $v.vpa.minAllowed }}
+        minAllowed:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with $v.vpa.maxAllowed }}
+        maxAllowed:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- if $v.metrics.enabled }}
+      - containerName: metrics
+        mode: "Off"
+      {{- end }}
+---
+{{- end }}
+{{- if and $v.metrics.enabled $v.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+    {{- with $v.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "harmony.selectorLabels" $ctx | nindent 6 }}
+  endpoints:
+    - port: metrics
+      interval: {{ $v.metrics.serviceMonitor.interval }}
+---
+{{- end }}
+{{- if and $v.metrics.enabled $v.metrics.prometheusRule.enabled }}
+{{- $r := $v.metrics.prometheusRule }}
+{{- $sel := printf "namespace=%q, service=%q" .Release.Namespace $name }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "harmony.labels" $ctx | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: harmony-redis
+      rules:
+        - alert: HarmonyRedisDown
+          expr: redis_up{ {{- $sel -}} } == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Harmony's Redis is down"
+            description: "The exporter in {{ `{{ $labels.pod }}` }} cannot reach Redis. Federation queues, presence and rate limits stop."
+        - alert: HarmonyRedisMemoryHigh
+          expr: |
+            redis_memory_used_bytes{ {{- $sel -}} } / (redis_memory_max_bytes{ {{- $sel -}} } > 0) > {{ $r.memoryWarningRatio }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Harmony's Redis is above {{ mulf $r.memoryWarningRatio 100 | int }}% of maxmemory"
+            description: "Redis uses {{ `{{ $value | humanizePercentage }}` }} of maxmemory. At 100% it refuses new jobs (noeviction). Raise redis.resources.limits.memory, enable redis.vpa, or drain the queues."
+        - alert: HarmonyRedisMemoryCritical
+          expr: |
+            redis_memory_used_bytes{ {{- $sel -}} } / (redis_memory_max_bytes{ {{- $sel -}} } > 0) > {{ $r.memoryCriticalRatio }}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Harmony's Redis is about to refuse writes"
+            description: "Redis uses {{ `{{ $value | humanizePercentage }}` }} of maxmemory; new federation jobs will fail once it is full."
+        - alert: HarmonyRedisRejectingWrites
+          expr: increase(redis_errors_total{ {{- $sel -}}, err="OOM"}[5m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Harmony's Redis is refusing writes (OOM)"
+            description: "Redis answered OOM errors in the last 5 minutes; jobs are not being queued."
+        - alert: HarmonyQueueBacklog
+          expr: |
+            max by (key) (redis_key_size{ {{- $sel -}}, key=~"harmony:.+:wait"}) > {{ $r.queueBacklogThreshold }}
+          for: {{ $r.queueBacklogFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Harmony queue {{ `{{ $labels.key }}` }} is backing up"
+            description: "{{ `{{ $value }}` }} jobs waiting. Check the federation worker (logs, federation.worker.autoscaling) and the receiving servers."
+        {{- with $r.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}
+{{- end }}

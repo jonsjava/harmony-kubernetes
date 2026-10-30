@@ -8,3 +8,7 @@ supabase:
   db:
     host: supabase-supabase-db.supabase.svc
     password: pg-test
+redis:
+  metrics:
+    enabled: true
+    queues: [federate-post, send-push-notification]

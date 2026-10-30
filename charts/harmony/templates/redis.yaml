@@ -36,12 +36,39 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           # BullMQ needs noeviction: an evicted job key loses the job.
+          # maxmemory: MAXMEMORY, else MAXMEMORY_PERCENT of the cgroup memory
+          # limit ($$ escapes the kubelet's $(VAR) expansion).
           command:
             - sh
-            - -c
-            - exec redis-server --appendonly yes --maxmemory-policy noeviction --dir /data --requirepass "$REDIS_PASSWORD"
+            - -ec
+            - |
+              mm="$MAXMEMORY"
+              if [ -z "$mm" ]; then
+                lim=""
+                if [ -r /sys/fs/cgroup/memory.max ]; then
+                  lim="$$(cat /sys/fs/cgroup/memory.max)"
+                elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+                  lim="$$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
+                fi
+                case "$lim" in
+                  ''|max|*[!0-9]*) ;;
+                  *) if [ "$lim" -lt 1000000000000000 ]; then mm="$$((lim / 100 * MAXMEMORY_PERCENT))"; fi ;;
+                esac
+              fi
+              set -- --appendonly yes --maxmemory-policy noeviction --dir /data
+              if [ -n "$mm" ]; then
+                echo "maxmemory $mm"
+                set -- "$@" --maxmemory "$mm"
+              else
+                echo "no memory limit: maxmemory unset"
+              fi
+              exec redis-server "$@" --requirepass "$REDIS_PASSWORD"
           env:
             {{- include "harmony.env.secret" (dict "root" . "name" "REDIS_PASSWORD") | nindent 12 }}
+            - name: MAXMEMORY
+              value: {{ $v.maxmemory | quote }}
+            - name: MAXMEMORY_PERCENT
+              value: {{ $v.maxmemoryPercent | int | toString | quote }}
             - name: REDISCLI_AUTH
               value: $(REDIS_PASSWORD)
           ports:
@@ -63,6 +90,39 @@ spec:
               mountPath: /data
             - name: tmp
               mountPath: /tmp
+        {{- if $v.metrics.enabled }}
+        - name: metrics
+          image: {{ include "harmony.thirdPartyImage" $v.metrics.image }}
+          imagePullPolicy: {{ $v.metrics.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: REDIS_ADDR
+              value: redis://localhost:6379
+            {{- include "harmony.env.secret" (dict "root" . "name" "REDIS_PASSWORD") | nindent 12 }}
+            {{- if $v.metrics.queues }}
+            - name: REDIS_EXPORTER_CHECK_SINGLE_KEYS
+              value: {{ include "harmony.redis.queueKeys" . | quote }}
+            {{- else if $v.metrics.queueKeyPattern }}
+            - name: REDIS_EXPORTER_CHECK_KEYS
+              value: {{ printf "db0=%s" $v.metrics.queueKeyPattern | quote }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 9121
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            periodSeconds: 30
+          resources:
+            {{- toYaml $v.metrics.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -99,4 +159,9 @@ spec:
     - name: redis
       port: 6379
       targetPort: redis
+    {{- if $v.metrics.enabled }}
+    - name: metrics
+      port: 9121
+      targetPort: metrics
+    {{- end }}
 {{- end }}

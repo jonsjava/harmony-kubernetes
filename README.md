@@ -179,7 +179,7 @@ The main groups:
 | `supabase.*` | Kong URL inside and outside the cluster, keys, Postgres connection, upload ceiling |
 | `secrets.*` | Generated once and kept (`helm.sh/resource-policy: keep`): Redis password, listener role password, internal API secret, LiveKit key pair, bridge secret. Also VAPID keys, Klipy keys, FCM JSON. Or `secrets.existingSecret` |
 | `web` / `router` / `federation.server` / `federation.worker` | replicas, resources, scheduling, `autoscaling` |
-| `redis.*` | bundled StatefulSet or `external` |
+| `redis.*` | bundled StatefulSet or `external`; maxmemory, VPA, exporter, alerts |
 | `botGateway` / `discordBridge` / `livekit` | optional services |
 | `ingress` / `gateway` | Ingress and/or Gateway API HTTPRoutes |
 | `migrations.*` / `admin.*` | hook jobs |
@@ -256,7 +256,53 @@ to exactly one worker.
 
 What does **not** scale: `bot-gateway` (WebSocket sessions live in the process),
 `discord-bridge` (one Discord connection per bridge), `livekit` (one SFU with fixed
-media ports), `media-cache` and `redis`.
+media ports) and `media-cache`. Redis grows vertically instead; see below.
+
+## Redis: memory, VPA and monitoring
+
+Redis does not scale out for Harmony: BullMQ needs a single primary (every
+enqueue and claim is a write, run as a multi-key Lua script), and Harmony's
+queue prefix `harmony` carries no `{hash tag}`, so Redis Cluster is out.
+Queue depth is held in Redis **memory**, so the chart sizes Redis vertically
+and watches it.
+
+- **maxmemory follows the memory limit.** Redis runs with
+  `maxmemory-policy noeviction`, so a job key is never dropped; at `maxmemory`
+  it refuses new writes instead. At start the container sets `maxmemory` to
+  `redis.maxmemoryPercent` (85) of its cgroup memory limit, which leaves room
+  for AOF rewrites and avoids an OOM kill. `redis.maxmemory` overrides it.
+- **VPA** (`redis.vpa.enabled`, needs the
+  [Vertical Pod Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler))
+  sizes Redis memory from its usage between `minAllowed` and `maxAllowed`. Start
+  with `updateMode: "Off"` and read the recommendation with
+  `kubectl describe vpa harmony-redis`; `Recreate` applies it by restarting Redis
+  (AOF keeps the queues), `InPlaceOrRecreate` resizes in place where the cluster
+  supports it. Because `controlledValues: RequestsAndLimits` scales the limit too,
+  and `maxmemory` is read from the limit at start, the two stay in step.
+- **Metrics** (`redis.metrics.enabled`) add a
+  [redis_exporter](https://github.com/oliver006/redis_exporter) sidecar on port
+  9121. Besides the usual Redis metrics it exports every queue's waiting jobs as
+  `redis_key_size{key="harmony:<queue>:wait"}`, by SCAN over
+  `redis.metrics.queueKeyPattern`, or by direct lookup when you list
+  `redis.metrics.queues`.
+- **ServiceMonitor and PrometheusRule** (`redis.metrics.serviceMonitor.enabled`,
+  `redis.metrics.prometheusRule.enabled`, Prometheus Operator) scrape it and alert:
+
+| Alert | Fires when |
+|---|---|
+| `HarmonyRedisDown` | the exporter cannot reach Redis for 5 m |
+| `HarmonyRedisMemoryHigh` | memory above 75% of `maxmemory` for 10 m (warning) |
+| `HarmonyRedisMemoryCritical` | above 90% for 5 m |
+| `HarmonyRedisRejectingWrites` | Redis answered OOM errors in the last 5 m: jobs are being refused |
+| `HarmonyQueueBacklog` | one queue holds more than 1000 waiting jobs for 15 m (warning) |
+
+Thresholds are under `redis.metrics.prometheusRule`; `extraRules` appends your own.
+Label the ServiceMonitor and rule for your Prometheus' selectors, e.g.
+`labels: {release: kube-prometheus-stack}`. These options cover the bundled
+Redis; with `redis.enabled=false`, monitor your own Redis the same way.
+
+A backlog alert means the consumers are behind: check the worker's logs and
+the remote servers it delivers to, and consider `federation.worker.autoscaling`.
 
 ## Voice and video (LiveKit)
 
@@ -347,8 +393,8 @@ helm template h charts/harmony -f charts/harmony/ci/minimal-values.yaml
 ```
 
 CI ([`.github/workflows/lint.yaml`](.github/workflows/lint.yaml)) lints and
-renders every `ci/*-values.yaml` and validates the output, including the KEDA
-and Gateway API CRDs. Tagging `chart-vX.Y.Z` publishes the chart to
+renders every `ci/*-values.yaml` and validates the output, including the KEDA,
+Gateway API, VPA and Prometheus Operator CRDs. Tagging `chart-vX.Y.Z` publishes the chart to
 `oci://ghcr.io/jonsjava/charts/harmony`.
 
 Harmony is © its authors and licensed under AGPL-3.0 with additional terms

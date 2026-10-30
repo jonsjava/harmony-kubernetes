@@ -51,3 +51,11 @@ federation:
     autoscaling: {enabled: true, memory: 80}
   worker:
     autoscaling: {enabled: true}
+redis:
+  vpa:
+    enabled: true
+    updateMode: InPlaceOrRecreate
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true, labels: {release: kube-prometheus-stack}}
+    prometheusRule: {enabled: true}

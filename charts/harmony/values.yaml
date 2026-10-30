@@ -302,9 +302,66 @@ redis:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 1Gi }
+  # Redis runs with noeviction (BullMQ must never lose a job key), so at
+  # maxmemory it refuses writes instead of dropping data. maxmemory is set at
+  # container start to this share of the container's memory limit, read from
+  # the cgroup, so it follows a limit the VPA changes. Without a limit, no
+  # maxmemory is set. An explicit maxmemory (e.g. "850mb") wins.
+  maxmemoryPercent: 85
+  maxmemory: ""
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+  # VerticalPodAutoscaler for Redis memory (needs the VPA components installed).
+  # Queue depth lives in Redis memory; more pods would not help (BullMQ needs a
+  # single primary), a bigger pod does.
+  #   updateMode Off:   recommendations only (kubectl describe vpa)
+  #   Initial:          applied when the pod is (re)created
+  #   Recreate:         VPA evicts the pod to apply them (brief Redis restart;
+  #                     AOF keeps the queues)
+  #   InPlaceOrRecreate: resize without restart where the cluster supports it
+  vpa:
+    enabled: false
+    updateMode: "Off"
+    minAllowed: { memory: 256Mi }
+    maxAllowed: { memory: 8Gi }
+    # RequestsAndLimits keeps the limit/request ratio, so maxmemory follows.
+    controlledValues: RequestsAndLimits
+
+  # Prometheus metrics: a redis_exporter sidecar on :9121.
+  metrics:
+    enabled: false
+    image:
+      repository: oliver006/redis_exporter
+      tag: v1.96.0
+      pullPolicy: IfNotPresent
+    # Queue lengths as redis_key_size{key="harmony:<queue>:wait"}. With queues
+    # empty the exporter SCANs for the pattern on every scrape; listing the
+    # queues looks the keys up directly instead (cheaper with many keys).
+    queueKeyPattern: "harmony:*:wait"
+    queues: []
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+    serviceMonitor:
+      # Prometheus Operator ServiceMonitor.
+      enabled: false
+      interval: 30s
+      labels: {}
+    prometheusRule:
+      # Prometheus Operator PrometheusRule with the alerts below.
+      enabled: false
+      labels: {}
+      # Redis memory use as a share of maxmemory.
+      memoryWarningRatio: 0.75
+      memoryCriticalRatio: 0.9
+      # Waiting jobs in any one queue, sustained for queueBacklogFor.
+      queueBacklogThreshold: 1000
+      queueBacklogFor: 15m
+      # Any extra rules, appended to the group.
+      extraRules: []
+
   # With enabled: false. The password comes from secrets.redisPassword.
   external:
     host: ""

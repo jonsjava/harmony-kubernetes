@@ -316,3 +316,10 @@ spec:
 replicas: {{ .replicas }}
 {{- end }}
 {{- end }}
+
+{{/* redis_exporter check-single-keys: db0=harmony:<queue>:wait,... */}}
+{{- define "harmony.redis.queueKeys" -}}
+{{- $keys := list }}
+{{- range .Values.redis.metrics.queues }}{{ $keys = append $keys (printf "db0=harmony:%s:wait" .) }}{{ end }}
+{{- join "," $keys }}
+{{- end }}

@@ -1,4 +1,4 @@
-"""Validates rendered KEDA and Gateway API objects against their CRD schemas."""
+"""Validates rendered KEDA, Gateway API, VPA and Prometheus Operator objects against their CRD schemas."""
 import glob
 import sys
 
@@ -6,7 +6,14 @@ import jsonschema
 import yaml
 
 schemas = {}
-for path in glob.glob("/tmp/keda/config/crd/bases/*.yaml") + glob.glob("/tmp/gwapi/config/crd/standard/*.yaml"):
+crd_files = (
+    glob.glob("/tmp/keda/config/crd/bases/*.yaml")
+    + glob.glob("/tmp/gwapi/config/crd/standard/*.yaml")
+    + glob.glob("/tmp/vpa/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml")
+    + glob.glob("/tmp/promop/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml")
+    + glob.glob("/tmp/promop/example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml")
+)
+for path in crd_files:
     for doc in yaml.safe_load_all(open(path)):
         if not doc or doc.get("kind") != "CustomResourceDefinition":
             continue
@@ -22,10 +29,14 @@ for path in sys.argv[1:]:
         key = (doc["apiVersion"], doc["kind"])
         if key not in schemas:
             continue
-        try:
-            jsonschema.validate(doc, schemas[key])
-            print(f"ok      {path} {doc['kind']}/{doc['metadata']['name']}")
-        except jsonschema.ValidationError as err:
+        # CRD schemas carry Go regexes (e.g. (?i) mid-pattern) that Python's re
+        # rejects as a schema; validate the documents without checking the schema.
+        errors = list(jsonschema.Draft7Validator(schemas[key]).iter_errors(doc))
+        name = f"{path} {doc['kind']}/{doc['metadata']['name']}"
+        if errors:
             failed = True
-            print(f"INVALID {path} {doc['kind']}/{doc['metadata']['name']}: {err.message} at {list(err.path)}")
+            for err in errors:
+                print(f"INVALID {name}: {err.message} at {list(err.path)}")
+        else:
+            print(f"ok      {name}")
 sys.exit(1 if failed else 0)
