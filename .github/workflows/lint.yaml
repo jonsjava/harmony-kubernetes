@@ -12,7 +12,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: azure/setup-helm@v4
         with:
@@ -47,6 +49,21 @@ jobs:
             echo "::endgroup::"
           done
           python3 .github/scripts/validate-crs.py /tmp/*.out.yaml
+
+      - name: License files in the chart match the repository's
+        run: |
+          cmp LICENSE charts/harmony/LICENSE
+          cmp NOTICE charts/harmony/NOTICE
+          diff -r LICENSES charts/harmony/LICENSES
+
+      - name: Chart version bumped when the chart changed
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          if git diff --quiet "origin/${{ github.base_ref }}" -- charts/harmony; then exit 0; fi
+          old="$(git show "origin/${{ github.base_ref }}:charts/harmony/Chart.yaml" | sed -n 's/^version: //p')"
+          new="$(sed -n 's/^version: //p' charts/harmony/Chart.yaml)"
+          [ "$old" != "$new" ] || { echo "charts/harmony changed but version is still $new"; exit 1; }
 
       - name: Check the migration script
         run: sh -n charts/harmony/files/migrate.sh && node --check charts/harmony/files/create-admin.mjs

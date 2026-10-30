@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Derived from Harmony's self-host/admin.sh (https://github.com/y4my4my4m/harmony),
+// Copyright (C) 2024-present y4my4my4m and the Harmony contributors. See NOTICE.
 // Creates (or promotes) the instance admin: a port of upstream
 // self-host/admin.sh `create`. GoTrue's admin API creates the account with the
 // address confirmed, the account signs in and inserts its profile as the app

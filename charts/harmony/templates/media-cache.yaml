@@ -1,3 +1,8 @@
+{{/*
+SPDX-License-Identifier: AGPL-3.0-only
+Derived from Harmony's self-host/media-cache.conf (https://github.com/y4my4my4m/harmony),
+Copyright (C) 2024-present y4my4my4m and the Harmony contributors. See NOTICE.
+*/}}
 {{- if and .Values.mediaCache.enabled .Values.supabase.proxy.enabled }}
 {{- $c := "media-cache" }}
 {{- $v := .Values.mediaCache }}

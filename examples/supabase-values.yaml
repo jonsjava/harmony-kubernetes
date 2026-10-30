@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Derived from Harmony's self-host/supabase-overrides.yml (https://github.com/y4my4my4m/harmony),
+# Copyright (C) 2024-present y4my4my4m and the Harmony contributors. See NOTICE.
+# Default entries from supabase-community/supabase-kubernetes (Apache-2.0).
 # =============================================================================
 # Values for supabase-community/supabase-kubernetes (charts/supabase) paired
 # with the Harmony chart. Carries upstream Harmony's supabase-overrides.yml:

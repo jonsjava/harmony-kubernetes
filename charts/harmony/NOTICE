@@ -1,0 +1,45 @@
+harmony-kubernetes
+==================
+
+Copyright (c) 2026 jonsjava and the harmony-kubernetes contributors.
+
+This repository and the Helm chart it publishes are licensed under the MIT
+License (LICENSE), EXCEPT the files listed below, which are derived from
+Harmony and remain under the GNU Affero General Public License version 3 with
+Harmony's additional terms under its Section 7 (LICENSES/AGPL-3.0-only.txt,
+LICENSES/Harmony-AGPL-additional-terms.md). Each carries an
+SPDX-License-Identifier line saying so.
+
+  charts/harmony/files/migrate.sh           from self-host/bootstrap.sh
+  charts/harmony/files/create-admin.mjs     from self-host/admin.sh
+  charts/harmony/templates/_caddyfile.tpl   from self-host/Caddyfile
+  charts/harmony/templates/media-cache.yaml from self-host/media-cache.conf
+  examples/supabase-values.yaml             from self-host/supabase-overrides.yml
+                                            (its default entries come from
+                                            supabase-community/supabase-kubernetes,
+                                            Apache License 2.0)
+  scripts/generate-secrets.sh               JWT signing from self-host/configure.sh
+
+Their original notice, retained as Harmony's additional terms require:
+
+  Harmony - federated social application
+  Copyright (C) 2024-present  y4my4my4m  <https://github.com/y4my4my4m>
+                              and the Harmony contributors
+
+  This program is free software: you can redistribute it and/or modify it
+  under the terms of the GNU Affero General Public License version 3 as
+  published by the Free Software Foundation, with the additional terms
+  described in LICENSE-ADDITIONAL-TERMS.md (Section 7 of the GNU AGPL v3).
+
+  This program is distributed in the hope that it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License
+  for more details.
+
+  Source: https://github.com/y4my4my4m/harmony
+
+The chart deploys Harmony's published container images unmodified; those
+images are Harmony's, under Harmony's license. "Harmony" and its logo are
+trademarks of y4my4my4m (https://github.com/y4my4my4m/harmony/blob/master/TRADEMARK.md).
+This chart is an unofficial community project and is not endorsed by the
+Harmony project.

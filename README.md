@@ -58,6 +58,25 @@ Supabase Cloud.
 - KEDA 2.10+ if you enable any `autoscaling` block
 - Pods need outbound HTTPS: federation talks to other servers, and the migrations job clones `github.com/y4my4my4m/harmony`
 
+## Getting the chart
+
+The chart is published from this repository on every version bump:
+
+```bash
+# OCI (GitHub Container Registry)
+helm install harmony oci://ghcr.io/jonsjava/charts/harmony --version 0.2.0 \
+  -n harmony -f harmony-values.yaml
+
+# Classic Helm repository (GitHub Pages)
+helm repo add harmony-k8s https://jonsjava.github.io/harmony-kubernetes
+helm repo update
+helm install harmony harmony-k8s/harmony -n harmony -f harmony-values.yaml
+```
+
+Every version is also attached to a
+[GitHub Release](https://github.com/jonsjava/harmony-kubernetes/releases) as a
+`.tgz`. From a checkout, `./charts/harmony` works in place of the chart reference.
+
 ## Install
 
 ### 1. Secrets shared by Supabase and Harmony
@@ -133,7 +152,7 @@ ingress:
 ```
 
 ```bash
-helm install harmony ./charts/harmony -n harmony -f harmony-values.yaml
+helm install harmony oci://ghcr.io/jonsjava/charts/harmony -n harmony -f harmony-values.yaml
 kubectl -n harmony logs job/harmony-migrations --all-containers -f
 ```
 
@@ -350,7 +369,7 @@ address (hairpin through your load balancer). Override with
 ## Upgrades and migrations
 
 ```bash
-helm upgrade harmony ./charts/harmony -n harmony -f harmony-values.yaml --set image.tag=<new version>
+helm upgrade harmony oci://ghcr.io/jonsjava/charts/harmony -n harmony -f harmony-values.yaml --set image.tag=<new version>
 ```
 
 The migrations job is a `pre-upgrade` hook: it clones `db_schema/migrations` at
@@ -394,9 +413,24 @@ helm template h charts/harmony -f charts/harmony/ci/minimal-values.yaml
 
 CI ([`.github/workflows/lint.yaml`](.github/workflows/lint.yaml)) lints and
 renders every `ci/*-values.yaml` and validates the output, including the KEDA,
-Gateway API, VPA and Prometheus Operator CRDs. Tagging `chart-vX.Y.Z` publishes the chart to
-`oci://ghcr.io/jonsjava/charts/harmony`.
+Gateway API, VPA and Prometheus Operator CRDs, and on pull requests requires a
+chart version bump when the chart changed.
 
-Harmony is © its authors and licensed under AGPL-3.0 with additional terms
-(see the [upstream repository](https://github.com/y4my4my4m/harmony)); this
-repository holds deployment configuration only.
+### Releasing
+
+Bump `version` in `charts/harmony/Chart.yaml` and merge to `main`.
+[`.github/workflows/release.yaml`](.github/workflows/release.yaml) runs
+[chart-releaser](https://github.com/helm/chart-releaser-action), which creates
+the GitHub Release `harmony-<version>` with the packaged chart, adds it to
+`index.yaml` on the `gh-pages` branch (served by GitHub Pages), and pushes it to
+`oci://ghcr.io/jonsjava/charts/harmony`. A version that already exists is skipped.
+
+## License
+
+[MIT](LICENSE), except a few files derived from Harmony's own self-host
+scripts (the migration and admin scripts, the router and media-cache
+configuration, the Supabase example and the JWT signing in
+`scripts/generate-secrets.sh`), which stay under Harmony's AGPL-3.0 with its
+additional terms. [NOTICE](NOTICE) lists them; each carries an SPDX line.
+Harmony itself, and its images, are © y4my4my4m and the Harmony contributors
+under that license.

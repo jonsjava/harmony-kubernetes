@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Derived from Harmony's self-host/bootstrap.sh (https://github.com/y4my4my4m/harmony),
+# Copyright (C) 2024-present y4my4my4m and the Harmony contributors. See NOTICE.
 # Harmony database bootstrap for Kubernetes: a port of upstream
 # self-host/bootstrap.sh that talks to Postgres over TCP instead of
 # `docker exec`. Applies db_schema/migrations in version order, recorded in

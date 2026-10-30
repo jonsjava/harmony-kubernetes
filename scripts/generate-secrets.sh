@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# sign_jwt is derived from Harmony's self-host/configure.sh
+# (https://github.com/y4my4my4m/harmony), Copyright (C) 2024-present y4my4my4m
+# and the Harmony contributors. See NOTICE.
 # Creates the Secrets a Supabase release (supabase-community/supabase-kubernetes)
 # and the Harmony chart share, in one namespace:
 #

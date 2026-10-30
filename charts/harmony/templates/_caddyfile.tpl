@@ -1,3 +1,8 @@
+{{/*
+SPDX-License-Identifier: AGPL-3.0-only
+Derived from Harmony's self-host/Caddyfile (https://github.com/y4my4my4m/harmony),
+Copyright (C) 2024-present y4my4my4m and the Harmony contributors. See NOTICE.
+*/}}
 {{- define "harmony.caddyfile" -}}
 {{- $v := .Values.router }}
 {{- $fed := printf "%s:3001" (include "harmony.componentName" (dict "root" . "component" "federation-server")) }}

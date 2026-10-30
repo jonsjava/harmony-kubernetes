@@ -1,36 +1,64 @@
 name: Release chart
 
-# Tag chart-vX.Y.Z (matching charts/harmony/Chart.yaml version) to publish
-# oci://ghcr.io/<owner>/charts/harmony.
+# On every push to main that changes the chart: when charts/harmony/Chart.yaml
+# carries a version not released yet, chart-releaser
+#   - packages the chart and creates the GitHub Release harmony-<version>
+#     with the .tgz attached,
+#   - adds it to index.yaml on the gh-pages branch (the Helm repository at
+#     https://<owner>.github.io/<repo>), and
+#   - pushes it to oci://ghcr.io/<owner>/charts/harmony.
+# Bump the chart version to publish; an existing version is skipped.
 on:
   push:
-    tags: ["chart-v*"]
+    branches: [main]
+    paths:
+      - "charts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: release-chart
+  cancel-in-progress: false
 
 permissions:
-  contents: read
-  packages: write
+  contents: write   # GitHub Release and the gh-pages index
+  packages: write   # ghcr.io OCI push
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
 
-      - name: Check the tag matches the chart version
-        run: |
-          chart_version="$(helm show chart charts/harmony | sed -n 's/^version: //p')"
-          [ "chart-v$chart_version" = "$GITHUB_REF_NAME" ] ||
-            { echo "tag $GITHUB_REF_NAME does not match chart version $chart_version"; exit 1; }
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Package and push
-        env:
-          OWNER: ${{ github.repository_owner }}
+      - name: Lint before publishing
         run: |
-          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "$owner" --password-stdin
-          helm package charts/harmony -d dist
-          helm push dist/*.tgz "oci://ghcr.io/$owner/charts"
+          for f in charts/harmony/ci/*-values.yaml; do
+            helm lint charts/harmony -f "$f" --strict
+          done
+
+      - name: Publish
+        uses: helm/chart-releaser-action@v1.8.0
+        with:
+          charts_dir: charts
+          skip_existing: true
+          oci_registry_url: oci://ghcr.io/${{ github.repository_owner }}/charts
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CR_GENERATE_RELEASE_NOTES: "true"
